@@ -3,21 +3,20 @@ package orderecho
 import (
 	"net/http"
 
-	"github.com/google/uuid"
-	"github.com/guregu/null/v6"
-
 	orderbiz "shopnexus-server/internal/module/order/biz"
 	authclaims "shopnexus-server/internal/shared/claims"
+	sharedmodel "shopnexus-server/internal/shared/model"
 	"shopnexus-server/internal/shared/response"
 
 	"github.com/labstack/echo/v4"
 )
 
-type GetCartRequest struct {
+type ListIncomingItemsRequest struct {
+	sharedmodel.PaginationParams
 }
 
-func (h *Handler) GetCart(c echo.Context) error {
-	var req GetCartRequest
+func (h *Handler) ListIncomingItems(c echo.Context) error {
+	var req ListIncomingItemsRequest
 	if err := c.Bind(&req); err != nil {
 		return response.FromError(c.Response().Writer, http.StatusBadRequest, err)
 	}
@@ -30,8 +29,42 @@ func (h *Handler) GetCart(c echo.Context) error {
 		return response.FromError(c.Response().Writer, http.StatusUnauthorized, err)
 	}
 
-	result, err := h.biz.GetCart(c.Request().Context(), orderbiz.GetCartParams{
-		AccountID: claims.Account.ID,
+	result, err := h.biz.ListIncomingItems(c.Request().Context(), orderbiz.ListIncomingItemsParams{
+		SellerID:         claims.Account.ID,
+		PaginationParams: req.PaginationParams.Constrain(),
+	})
+	if err != nil {
+		return response.FromError(c.Response().Writer, http.StatusInternalServerError, err)
+	}
+
+	return response.FromPaginate(c.Response().Writer, result)
+}
+
+type ConfirmItemsRequest struct {
+	ItemIDs         []int64 `json:"item_ids" validate:"required,min=1"`
+	TransportOption string  `json:"transport_option" validate:"required,min=1,max=100"`
+	Note            string  `json:"note" validate:"max=500"`
+}
+
+func (h *Handler) ConfirmItems(c echo.Context) error {
+	var req ConfirmItemsRequest
+	if err := c.Bind(&req); err != nil {
+		return response.FromError(c.Response().Writer, http.StatusBadRequest, err)
+	}
+	if err := c.Validate(&req); err != nil {
+		return response.FromError(c.Response().Writer, http.StatusBadRequest, err)
+	}
+
+	claims, err := authclaims.GetClaims(c.Request())
+	if err != nil {
+		return response.FromError(c.Response().Writer, http.StatusUnauthorized, err)
+	}
+
+	result, err := h.biz.ConfirmItems(c.Request().Context(), orderbiz.ConfirmItemsParams{
+		Account:         claims.Account,
+		ItemIDs:         req.ItemIDs,
+		TransportOption: req.TransportOption,
+		Note:            req.Note,
 	})
 	if err != nil {
 		return response.FromError(c.Response().Writer, http.StatusInternalServerError, err)
@@ -40,14 +73,12 @@ func (h *Handler) GetCart(c echo.Context) error {
 	return response.FromDTO(c.Response().Writer, http.StatusOK, result)
 }
 
-type UpdateCartRequest struct {
-	SkuID         uuid.UUID  `json:"sku_id" validate:"required"`
-	Quantity      null.Int64 `json:"quantity" validate:"omitnil"`
-	DeltaQuantity null.Int64 `json:"delta_quantity" validate:"omitnil"`
+type RejectItemsRequest struct {
+	ItemIDs []int64 `json:"item_ids" validate:"required,min=1"`
 }
 
-func (h *Handler) UpdateCart(c echo.Context) error {
-	var req UpdateCartRequest
+func (h *Handler) RejectItems(c echo.Context) error {
+	var req RejectItemsRequest
 	if err := c.Bind(&req); err != nil {
 		return response.FromError(c.Response().Writer, http.StatusBadRequest, err)
 	}
@@ -60,40 +91,12 @@ func (h *Handler) UpdateCart(c echo.Context) error {
 		return response.FromError(c.Response().Writer, http.StatusUnauthorized, err)
 	}
 
-	if err := h.biz.UpdateCart(c.Request().Context(), orderbiz.UpdateCartParams{
-		Account:       claims.Account,
-		SkuID:         req.SkuID,
-		Quantity:      req.Quantity,
-		DeltaQuantity: req.DeltaQuantity,
-	}); err != nil {
-		return response.FromError(c.Response().Writer, http.StatusInternalServerError, err)
-	}
-
-	return response.FromMessage(c.Response().Writer, http.StatusOK, "Update cart successfully")
-}
-
-type ClearCartRequest struct {
-}
-
-func (h *Handler) ClearCart(c echo.Context) error {
-	var req ClearCartRequest
-	if err := c.Bind(&req); err != nil {
-		return response.FromError(c.Response().Writer, http.StatusBadRequest, err)
-	}
-	if err := c.Validate(&req); err != nil {
-		return response.FromError(c.Response().Writer, http.StatusBadRequest, err)
-	}
-
-	claims, err := authclaims.GetClaims(c.Request())
-	if err != nil {
-		return response.FromError(c.Response().Writer, http.StatusUnauthorized, err)
-	}
-
-	if err := h.biz.ClearCart(c.Request().Context(), orderbiz.ClearCartParams{
+	if err := h.biz.RejectItems(c.Request().Context(), orderbiz.RejectItemsParams{
 		Account: claims.Account,
+		ItemIDs: req.ItemIDs,
 	}); err != nil {
 		return response.FromError(c.Response().Writer, http.StatusInternalServerError, err)
 	}
 
-	return response.FromMessage(c.Response().Writer, http.StatusOK, "Clear cart successfully")
+	return response.FromMessage(c.Response().Writer, http.StatusOK, "Items rejected successfully")
 }
