@@ -1,76 +1,83 @@
-# ShopNexus Server
+ShopNexus thức giấc giữa đêm sâu,
+Trong repo lớn ánh terminal màu,
+Không chia cắt trăm miền repository,
+Một monorepo giữ chung nhịp cầu.
 
-[![wakatime](https://wakatime.com/badge/github/shopnexus/shopnexus-server.svg)](https://wakatime.com/badge/github/shopnexus/shopnexus-server)
+Microservice đứng thành từng phân khu,
+`account`, `catalog` nối lời viễn du,
+`order` gọi `inventory` lặng lẽ,
+Qua Restate bền bỉ giữa sương mù.
 
-A marketplace backend in Go — **microservices in a monorepo**, orchestrated by [Restate](https://restate.dev) durable execution.
+Không handler rối tung vì event,
+Không truy vết quanh co giữa nghìn thread,
+Flow xuôi dòng như con sông có hướng,
+Retry hoài cho tới lúc thành công.
 
-> Development timeline: [timeline.md](assets/timeline.md)
->
-> Code convention: [convention.md](assets/convention.md)
+Restate như người giữ cổng âm thầm,
+Ghi journal từng nhịp gọi xa xăm,
+Nếu service ngủ quên trong lỗi mạng,
+Ngày mai về vẫn tiếp tục đang làm.
 
-## Why?
-
-### Why microservice in a monorepo?
-
-*Many repos are hard to manage*.
-> Imagine 100hr+ on configuring things on each repo :D
-
-Splitting into many repos means configuring shared dependency versions across each project — staying in one repo sidesteps that. The microservice shape is still there (separate schemas, cross-module calls over the Restate ingress), so promoting a module to its own deployment later is a config change, not a refactor.
-
-### Why Restate?
-
-*Orchestration over choreography*.
-
-The flow runs linearly top-to-bottom, which is easier to debug than tracing events across handlers. In practice it's the message queue between modules — failures retry indefinitely with backoff (no message dropped, no DLQ needed) — and the journal makes those retries durable.
-
-## Request Flow
-
-Every call goes through a **proxy interface** that mirrors each service's method signatures — callers invoke it as if it were the service itself, while the proxy forwards the request over HTTP to the Restate ingress, which then routes it to the target service.
-
-![flow1.jpg](assets/flow1.jpg)
-
-Cross-service calls take the exact same path — Service A never calls Service B directly. Both external traffic and inter-service calls fan in through the proxy and the Restate ingress, so durability, retries, and observability apply uniformly to every call in the system.
-
-![flow2.jpg](assets/flow2.jpg)
-
-For example, the order service depends on `Inventory` as an **interface**, so the call site reads like an ordinary in-process method call:
+Proxy đứng như chiếc bóng vô hình,
+Method gọi nghe gần tựa tiến trình,
+Nhưng phía dưới là ingress đang chảy,
+HTTP mang tín hiệu đăng trình.
 
 ```go
-// Service "order" calling to "inventory" through the proxy interface
-inventories, err := orderbiz.inventory.ReserveInventory(ctx, inventorybiz.ReserveInventoryParams{
-    OrderID: order.ID,
-    Items:   items,
-})
+inventories, err := orderbiz.inventory.ReserveInventory(...)
 ```
 
-## Distributed Lock (Redis)
+Một dòng code tưởng giản dị biết bao,
+Sau lưng nó là orchestration cao,
+Service nọ chẳng nhìn service khác,
+Mọi con đường đều hội tụ một vào.
 
-```go
-unlock := b.locker.Lock(ctx, "order:123")
-defer unlock()
-```
+Redis lock canh cửa giữa đêm dài,
+TTL trôi như cát cuốn không ngừng trôi,
+Nên goroutine âm thầm gia hạn,
+Giữ chiếc khóa chưa mục giữa dòng đời.
 
-Currently I only implement basic Redis lock/unlock, but while working on it I noticed a problem: if the handler takes too long, the lock TTL could expire mid-execution. To handle this, I added a background goroutine that extends the TTL every ttl/2, so long-running handlers never lose the lock. Calling unlock() stops the goroutine and DELs the key.
+`unlock()` khép lại cuộc hành quân,
+Xóa key đi như gió cuốn phù vân,
+Không deadlock nằm hoang trong bóng tối,
+Chỉ còn log cháy đỏ giữa machine.
 
-## Modules
+SQLC rèn struct từ câu SQL,
+Type-safe như kiếm thép giữa compiler,
+`pgtempl` viết CRUD từ migration,
+Đỡ dev ngồi gõ lặp đến tàn hơi.
 
-Each module has its own README with ER diagrams, domain concepts, flows, and endpoints.
+`genrestate` sinh interface tựa mơ,
+Proxy mọc lên từ định nghĩa chờ,
+Từ Go interface thành service thật,
+Code generation vang vọng từng giờ.
 
-| Module                                       | Description                                                            |
-| -------------------------------------------- | ---------------------------------------------------------------------- |
-| [`account`](internal/module/account/)        | Auth, profiles, contacts, favorites, payment methods, notifications    |
-| [`catalog`](internal/module/catalog/)        | Products, categories, tags, comments, hybrid search                    |
-| [`order`](internal/module/order/)            | Cart, checkout, pending items, seller confirmation, payment, refunds   |
-| [`inventory`](internal/module/inventory/)    | Stock management, serial tracking, audit history                       |
-| [`promotion`](internal/module/promotion/)    | Discounts, ship discounts, scheduling, group-based price stacking      |
-| [`analytic`](internal/module/analytic/)      | Interaction tracking, weighted product popularity scoring              |
-| [`chat`](internal/module/chat/)              | Messaging, conversations, read receipts                                |
-| [`common`](internal/module/common/)          | Resource/file management, object storage, service options, SSE         |
+Trong `catalog` là muôn vàn sản phẩm,
+Tag và search như sao sáng xa xăm,
+`promotion` gom giảm giá chồng lớp,
+`analytic` đếm từng lượt ghé thăm.
 
-## Tools
+`chat` giữ lại tin nhắn người mua,
+`common` chở file vượt biển object store,
+`inventory` canh từng serial nhỏ,
+`order` đợi seller xác nhận đơn.
 
-- **[pgx/v5](https://github.com/jackc/pgx)** as the PostgreSQL driver, wrapped in `pgsqlc.Storage[T]` for connection pooling and transaction support.
-- **[SQLC](https://sqlc.dev)** generates type-safe Go structs and query methods from SQL. Config in `sqlc.yaml`. Uses `guregu/null/v6` for nullable types.
-- **pgtempl** (`cmd/pgtempl/`) generates SQLC query templates from migration files, producing CRUD queries automatically.
-- **genrestate** (`cmd/genrestate/`) generates Restate service definitions and proxy interfaces from Go interface definitions.
-- **migrate** (`cmd/migrate/`) manages database migrations. Migration files are in `<module>/db/migrations/` with the format `<version>_<description>.sql`.
+Có những đêm migrate vừa chạy xong,
+Schema đổi như thủy triều trên sông,
+Version nối tiếp bằng tên migration,
+Lặng lẽ mà nâng đỡ cả hệ thống.
+
+ShopNexus không chỉ là backend,
+Mà là bản đồ của những lần fail,
+Của retry, rollback và transaction,
+Của những bug thức trắng suốt nhiều đêm.
+
+Mai sau nếu service cần tách riêng,
+Không refactor đổ nát cả công trình,
+Chỉ đổi config, đổi nơi deployment,
+Kiến trúc xưa vẫn giữ vững thân mình.
+
+Và giữa tiếng quạt quay cùng bàn phím,
+Một developer lặng ngắm log im,
+Thấy từng module như thành phố nhỏ,
+Đang sống nhờ orchestration bền tim.
